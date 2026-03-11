@@ -1,0 +1,4 @@
+interface:
+  display_name: "Demo Vibecoding Specs"
+  short_description: "按输入文档拆分精简且可执行的开发 specs。"
+  default_prompt: "使用 $demo-vibecoding-spec-generator 基于用户明确指定的权威需求和设计文档拆分 *.spec.md，并在缺少 AGENTS.md 时创建它。"
