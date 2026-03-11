@@ -1,3 +1,5 @@
+import * as line from '@line/bot-sdk';
+
 export interface AppConfig {
   port: number;
   line: {
@@ -41,3 +43,9 @@ export interface TaskExecutionLog {
   duration?: number;
   error?: string;
 }
+
+export type TextMessage = line.TextMessage;
+export type ImageMessage = line.ImageMessage;
+export type FlexMessage = line.FlexMessage;
+export type Message = line.Message;
+export type WebhookEvent = line.WebhookEvent;
