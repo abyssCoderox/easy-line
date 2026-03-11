@@ -4,8 +4,10 @@
 
 | 项目名称 | LINE Bot 智能消息处理系统 |
 |---------|-------------------------|
-| 文档版本 | V1.0 |
+| 文档版本 | V2.0 (Demo版) |
 | 创建日期 | 2026-03-11 |
+| 更新日期 | 2026-03-12 |
+| 技术栈 | @line/bot-sdk + Express |
 | 文档状态 | 待评审 |
 
 ---
@@ -20,16 +22,28 @@
 | 数据格式 | JSON |
 | 字符编码 | UTF-8 |
 | 时间格式 | ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ) |
-| API版本 | v1 |
+| LINE SDK | @line/bot-sdk v7.x |
+| Web框架 | Express v4.x |
 
 ### 1.2 基础URL
 
 ```
-生产环境: https://api.example.com/api/v1
-测试环境: https://api-test.example.com/api/v1
+生产环境: https://your-domain.com
+测试环境: http://localhost:3000 (配合ngrok)
 ```
 
-### 1.3 通用响应格式
+### 1.3 LINE Messaging API 基础
+
+本项目使用 LINE 官方 SDK `@line/bot-sdk` 进行开发，主要涉及以下 API：
+
+| API | 用途 | SDK方法 |
+|-----|------|---------|
+| Webhook | 接收用户消息事件 | middleware + webhook handler |
+| Reply Message | 回复用户消息 | `client.replyMessage()` |
+| Push Message | 主动推送消息 | `client.pushMessage()` |
+| Multicast | 批量推送消息 | `client.multicast()` |
+
+### 1.4 通用响应格式
 
 **成功响应：**
 ```json
@@ -54,20 +68,16 @@
 }
 ```
 
-### 1.4 错误码定义
+### 1.5 错误码定义
 
 | 错误码 | 说明 |
 |--------|------|
 | 0 | 成功 |
 | 1001 | 参数错误 |
 | 1002 | 资源不存在 |
-| 1003 | 资源已存在 |
-| 2001 | 认证失败 |
-| 2002 | Token过期 |
-| 2003 | 权限不足 |
+| 2001 | 签名验证失败 |
 | 3001 | 服务内部错误 |
 | 3002 | 第三方服务错误 |
-| 3003 | 服务暂时不可用 |
 
 ---
 
@@ -75,24 +85,53 @@
 
 ### 2.1 LINE Webhook回调
 
-接收LINE服务器推送的消息事件。
+接收LINE服务器推送的消息事件，使用 `@line/bot-sdk` 的中间件进行签名验证。
 
 **请求信息：**
 
 | 项目 | 说明 |
 |------|------|
-| URL | `POST /webhook/line` |
-| 认证 | 签名验证 (X-Line-Signature) |
+| URL | `POST /webhook` |
+| 认证 | X-Line-Signature 签名验证 |
 | 来源 | LINE服务器 |
+| SDK | `middleware()` 自动验证签名 |
+
+**Express 路由配置：**
+
+```typescript
+import express from 'express';
+import { middleware, Client } from '@line/bot-sdk';
+
+const app = express();
+
+const config = {
+  channelSecret: process.env.LINE_CHANNEL_SECRET!,
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!
+};
+
+const client = new Client(config);
+
+app.post('/webhook', middleware(config), async (req, res) => {
+  const events = req.body.events;
+  
+  try {
+    await Promise.all(events.map(event => handleEvent(event)));
+    res.status(200).json({ status: 'ok' });
+  } catch (err) {
+    console.error('Webhook error:', err);
+    res.status(500).json({ status: 'error' });
+  }
+});
+```
 
 **请求头：**
 
 | Header | 类型 | 必填 | 说明 |
 |--------|------|------|------|
-| X-Line-Signature | string | 是 | 请求签名 |
+| X-Line-Signature | string | 是 | 请求签名（SDK自动验证） |
 | Content-Type | string | 是 | application/json |
 
-**请求体：**
+**请求体（Webhook Event）：**
 ```json
 {
   "destination": "U1234567890abcdef",
@@ -122,545 +161,236 @@
 }
 ```
 
-**HTTP状态码：**
+### 2.2 消息事件处理
 
-| 状态码 | 说明 |
-|--------|------|
-| 200 | 处理成功 |
-| 401 | 签名验证失败 |
-| 500 | 服务器错误 |
+**事件类型：**
 
----
+| 事件类型 | 说明 | SDK类型 |
+|---------|------|---------|
+| message | 消息事件 | MessageEvent |
+| follow | 关注事件 | FollowEvent |
+| unfollow | 取消关注 | UnfollowEvent |
+| join | 加入群组 | JoinEvent |
+| leave | 离开群组 | LeaveEvent |
 
-## 3. 定时任务接口
+**消息处理器实现：**
 
-### 3.1 创建定时任务
+```typescript
+import { 
+  WebhookEvent, 
+  MessageEvent, 
+  TextMessage,
+  Client 
+} from '@line/bot-sdk';
 
-创建新的定时任务配置。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `POST /api/v1/tasks` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "task_name": "每日天气推送",
-  "cron_expression": "0 8 * * *",
-  "api_endpoint": "https://api.weather.com/v1/current",
-  "api_method": "GET",
-  "api_headers": {
-    "Authorization": "Bearer xxx"
-  },
-  "api_body": {},
-  "message_template": "今日天气: {weather}, 温度: {temp}°C",
-  "target_type": "user",
-  "target_ids": ["U1234567890", "U0987654321"],
-  "enabled": true,
-  "retry_count": 3,
-  "retry_interval": 1000
-}
-```
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "task_name": "每日天气推送",
-    "cron_expression": "0 8 * * *",
-    "enabled": true,
-    "created_at": "2026-03-11T10:00:00.000Z"
+async function handleEvent(event: WebhookEvent): Promise<void> {
+  if (event.type !== 'message' || event.message.type !== 'text') {
+    return;
   }
-}
-```
 
-### 3.2 获取任务列表
+  const messageEvent = event as MessageEvent;
+  const userMessage = messageEvent.message.text;
+  const userId = messageEvent.source.userId;
+  const replyToken = messageEvent.replyToken;
 
-获取所有定时任务配置列表。
+  const replyText = await generateReply(userId, userMessage);
 
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/tasks` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| page | integer | 否 | 页码，默认1 |
-| page_size | integer | 否 | 每页数量，默认20 |
-| enabled | boolean | 否 | 按启用状态筛选 |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "total": 10,
-    "page": 1,
-    "page_size": 20,
-    "items": [
-      {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "task_name": "每日天气推送",
-        "cron_expression": "0 8 * * *",
-        "enabled": true,
-        "created_at": "2026-03-11T10:00:00.000Z"
-      }
-    ]
-  }
-}
-```
-
-### 3.3 获取任务详情
-
-获取指定任务的详细信息。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/tasks/{task_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**路径参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| task_id | string | 是 | 任务ID |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "task_name": "每日天气推送",
-    "cron_expression": "0 8 * * *",
-    "api_endpoint": "https://api.weather.com/v1/current",
-    "api_method": "GET",
-    "api_headers": {},
-    "api_body": {},
-    "message_template": "今日天气: {weather}, 温度: {temp}°C",
-    "target_type": "user",
-    "target_ids": ["U1234567890"],
-    "enabled": true,
-    "retry_count": 3,
-    "retry_interval": 1000,
-    "created_at": "2026-03-11T10:00:00.000Z",
-    "updated_at": "2026-03-11T10:00:00.000Z"
-  }
-}
-```
-
-### 3.4 更新任务配置
-
-更新指定任务的配置信息。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `PUT /api/v1/tasks/{task_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "task_name": "每日天气推送",
-  "cron_expression": "0 9 * * *",
-  "enabled": true
-}
-```
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "task_name": "每日天气推送",
-    "cron_expression": "0 9 * * *",
-    "enabled": true,
-    "updated_at": "2026-03-11T11:00:00.000Z"
-  }
-}
-```
-
-### 3.5 删除任务
-
-删除指定的定时任务。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `DELETE /api/v1/tasks/{task_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success"
-}
-```
-
-### 3.6 启用/禁用任务
-
-切换任务的启用状态。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `PATCH /api/v1/tasks/{task_id}/toggle` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "enabled": false
-}
-```
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "enabled": false
-  }
-}
-```
-
-### 3.7 手动执行任务
-
-手动触发一次任务执行。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `POST /api/v1/tasks/{task_id}/execute` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "execution_id": "660e8400-e29b-41d4-a716-446655440000",
-    "status": "pending"
-  }
-}
-```
-
-### 3.8 获取任务执行日志
-
-获取指定任务的执行日志列表。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/tasks/{task_id}/logs` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| page | integer | 否 | 页码，默认1 |
-| page_size | integer | 否 | 每页数量，默认20 |
-| status | string | 否 | 按状态筛选: success, failed |
-| start_date | string | 否 | 开始日期 |
-| end_date | string | 否 | 结束日期 |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "total": 100,
-    "page": 1,
-    "page_size": 20,
-    "items": [
-      {
-        "id": "770e8400-e29b-41d4-a716-446655440000",
-        "task_id": "550e8400-e29b-41d4-a716-446655440000",
-        "execute_time": "2026-03-11T08:00:00.000Z",
-        "status": "success",
-        "duration": 1500,
-        "created_at": "2026-03-11T08:00:01.500Z"
-      }
-    ]
-  }
+  await client.replyMessage(replyToken, {
+    type: 'text',
+    text: replyText
+  } as TextMessage);
 }
 ```
 
 ---
 
-## 4. 意图管理接口
+## 3. 消息回复接口
 
-### 4.1 获取意图列表
+### 3.1 Reply Message（回复消息）
 
-获取所有意图配置列表。
+使用 `replyToken` 回复用户消息，replyToken 有效期为30秒。
 
-**请求信息：**
+**SDK调用：**
 
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/intents` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| enabled | boolean | 否 | 按启用状态筛选 |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "items": [
-      {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "intent_id": "INTENT_WEATHER",
-        "intent_name": "天气查询",
-        "keywords": ["天气", "气温", "下雨"],
-        "patterns": ["今天.*天气", "明天.*天气"],
-        "handler": "WeatherHandler",
-        "priority": 1,
-        "enabled": true
-      }
-    ]
-  }
-}
+```typescript
+await client.replyMessage(replyToken, messages);
 ```
 
-### 4.2 创建意图配置
+**消息类型：**
 
-创建新的意图配置。
+| 类型 | 说明 | 用途 |
+|------|------|------|
+| text | 文本消息 | 普通文本回复 |
+| flex | Flex消息 | 富媒体消息 |
+| image | 图片消息 | 图片展示 |
+| sticker | 表情消息 | LINE表情 |
 
-**请求信息：**
+**文本消息示例：**
 
-| 项目 | 说明 |
-|------|------|
-| URL | `POST /api/v1/intents` |
-| 认证 | Bearer Token |
-| 权限 | admin |
+```typescript
+const textMessage: TextMessage = {
+  type: 'text',
+  text: '你好！有什么可以帮助你的吗？'
+};
 
-**请求体：**
-```json
-{
-  "intent_id": "INTENT_CUSTOM",
-  "intent_name": "自定义意图",
-  "keywords": ["关键词1", "关键词2"],
-  "patterns": ["正则表达式1", "正则表达式2"],
-  "handler": "CustomHandler",
-  "priority": 5,
-  "enabled": true
-}
+await client.replyMessage(replyToken, textMessage);
 ```
 
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "intent_id": "INTENT_CUSTOM",
-    "intent_name": "自定义意图",
-    "enabled": true
-  }
-}
+**多消息回复示例：**
+
+```typescript
+await client.replyMessage(replyToken, [
+  { type: 'text', text: '收到你的消息了！' },
+  { type: 'text', text: '正在处理中...' }
+]);
 ```
 
-### 4.3 更新意图配置
+### 3.2 Push Message（主动推送）
 
-更新指定的意图配置。
+主动向用户推送消息，无需用户先发送消息。
 
-**请求信息：**
+**SDK调用：**
 
-| 项目 | 说明 |
-|------|------|
-| URL | `PUT /api/v1/intents/{intent_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "intent_name": "更新后的意图名称",
-  "keywords": ["新关键词1", "新关键词2"],
-  "enabled": true
-}
+```typescript
+await client.pushMessage(userId, messages);
 ```
 
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "intent_id": "INTENT_CUSTOM",
-    "intent_name": "更新后的意图名称",
-    "updated_at": "2026-03-11T11:00:00.000Z"
-  }
-}
+**推送示例：**
+
+```typescript
+await client.pushMessage('U1234567890abcdef', {
+  type: 'text',
+  text: '这是一条主动推送的消息'
+});
 ```
 
-### 4.4 删除意图配置
+### 3.3 Multicast（批量推送）
 
-删除指定的意图配置。
+向多个用户同时推送相同消息。
 
-**请求信息：**
+**SDK调用：**
 
-| 项目 | 说明 |
-|------|------|
-| URL | `DELETE /api/v1/intents/{intent_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
+```typescript
+await client.multicast(userIds, messages);
+```
 
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success"
-}
+**批量推送示例：**
+
+```typescript
+const userIds = ['U1234567890', 'U0987654321'];
+
+await client.multicast(userIds, {
+  type: 'text',
+  text: '群发消息内容'
+});
 ```
 
 ---
 
-## 5. 用户管理接口
+## 4. 定时任务接口
 
-### 5.1 获取用户列表
+### 4.1 任务配置文件格式
 
-获取所有用户列表。
+Demo版本使用 JSON 文件配置定时任务，配合 `node-cron` 执行。
 
-**请求信息：**
+**配置文件：`config/tasks.json`**
 
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/users` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| page | integer | 否 | 页码，默认1 |
-| page_size | integer | 否 | 每页数量，默认20 |
-| status | string | 否 | 按状态筛选: active, blocked |
-| keyword | string | 否 | 按昵称搜索 |
-
-**响应：**
 ```json
 {
-  "code": 0,
-  "message": "success",
-  "data": {
-    "total": 1000,
-    "page": 1,
-    "page_size": 20,
-    "items": [
-      {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "line_user_id": "U1234567890abcdef",
-        "display_name": "张三",
-        "picture_url": "https://example.com/avatar.jpg",
-        "status": "active",
-        "created_at": "2026-03-01T10:00:00.000Z"
-      }
-    ]
-  }
+  "tasks": [
+    {
+      "id": "weather-push",
+      "name": "每日天气推送",
+      "enabled": true,
+      "schedule": "0 8 * * *",
+      "api": {
+        "url": "https://api.weather.com/v1/current",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer ${WEATHER_API_KEY}"
+        }
+      },
+      "template": "今日天气: {weather}, 温度: {temp}°C",
+      "targets": ["U1234567890"]
+    }
+  ]
 }
 ```
 
-### 5.2 获取用户详情
+### 4.2 定时任务服务实现
 
-获取指定用户的详细信息。
+```typescript
+import cron from 'node-cron';
+import { Client } from '@line/bot-sdk';
+import axios from 'axios';
 
-**请求信息：**
+interface TaskConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  schedule: string;
+  api: {
+    url: string;
+    method: string;
+    headers?: Record<string, string>;
+  };
+  template: string;
+  targets: string[];
+}
 
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/users/{user_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
+export class SchedulerService {
+  private tasks: Map<string, cron.ScheduledTask> = new Map();
+  
+  constructor(private client: Client) {}
 
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "line_user_id": "U1234567890abcdef",
-    "display_name": "张三",
-    "picture_url": "https://example.com/avatar.jpg",
-    "status": "active",
-    "created_at": "2026-03-01T10:00:00.000Z",
-    "updated_at": "2026-03-01T10:00:00.000Z",
-    "stats": {
-      "total_messages": 100,
-      "last_message_at": "2026-03-11T08:00:00.000Z"
+  loadTasks(config: { tasks: TaskConfig[] }): void {
+    for (const task of config.tasks) {
+      if (!task.enabled) continue;
+      
+      const scheduledTask = cron.schedule(task.schedule, () => {
+        this.executeTask(task);
+      });
+      
+      this.tasks.set(task.id, scheduledTask);
+      console.log(`Task loaded: ${task.name}`);
     }
   }
+
+  private async executeTask(task: TaskConfig): Promise<void> {
+    try {
+      const response = await axios({
+        method: task.api.method,
+        url: task.api.url,
+        headers: task.api.headers
+      });
+
+      const message = this.renderTemplate(task.template, response.data);
+      
+      await this.client.multicast(task.targets, {
+        type: 'text',
+        text: message
+      });
+      
+      console.log(`Task executed: ${task.name}`);
+    } catch (error) {
+      console.error(`Task failed: ${task.name}`, error);
+    }
+  }
+
+  private renderTemplate(template: string, data: Record<string, any>): string {
+    return template.replace(/\{(\w+)\}/g, (_, key) => data[key] ?? '');
+  }
 }
 ```
 
-### 5.3 获取用户对话历史
-
-获取指定用户的对话历史记录。
+### 4.3 手动触发任务（管理接口）
 
 **请求信息：**
 
 | 项目 | 说明 |
 |------|------|
-| URL | `GET /api/v1/users/{user_id}/conversations` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| page | integer | 否 | 页码，默认1 |
-| page_size | integer | 否 | 每页数量，默认20 |
-| start_date | string | 否 | 开始日期 |
-| end_date | string | 否 | 结束日期 |
+| URL | `POST /api/tasks/{task_id}/execute` |
+| 认证 | Bearer Token（Demo版简化） |
 
 **响应：**
 ```json
@@ -668,246 +398,72 @@
   "code": 0,
   "message": "success",
   "data": {
-    "total": 100,
-    "page": 1,
-    "page_size": 20,
-    "items": [
-      {
-        "id": "660e8400-e29b-41d4-a716-446655440000",
-        "role": "user",
-        "content": "今天天气怎么样",
-        "intent_id": "INTENT_WEATHER",
-        "created_at": "2026-03-11T08:00:00.000Z"
-      },
-      {
-        "id": "660e8400-e29b-41d4-a716-446655440001",
-        "role": "assistant",
-        "content": "今天天气晴朗，温度25°C",
-        "intent_id": null,
-        "created_at": "2026-03-11T08:00:01.000Z"
-      }
-    ]
+    "task_id": "weather-push",
+    "status": "executed"
   }
 }
 ```
 
 ---
 
-## 6. API配置接口
+## 5. LLM对话接口
 
-### 6.1 获取API配置列表
+### 5.1 LangChain集成
 
-获取所有第三方API配置列表。
+使用 LangChain.js 实现与大模型的对话交互。
 
-**请求信息：**
+**服务实现：**
 
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/api-configs` |
-| 认证 | Bearer Token |
-| 权限 | admin |
+```typescript
+import { ChatOpenAI } from '@langchain/openai';
+import { BufferMemory } from 'langchain/memory';
+import { ConversationChain } from 'langchain/chains';
 
-**查询参数：**
+export class LLMService {
+  private model: ChatOpenAI;
+  private memories: Map<string, BufferMemory> = new Map();
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| api_type | string | 否 | 按类型筛选: weather, news, stock, llm |
-| enabled | boolean | 否 | 按启用状态筛选 |
+  constructor() {
+    this.model = new ChatOpenAI({
+      modelName: 'gpt-3.5-turbo',
+      temperature: 0.7,
+      openAIApiKey: process.env.OPENAI_API_KEY
+    });
+  }
 
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "items": [
-      {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "api_name": "OpenAI",
-        "api_type": "llm",
-        "base_url": "https://api.openai.com/v1",
-        "timeout": 30000,
-        "retry_count": 3,
-        "enabled": true,
-        "created_at": "2026-03-01T10:00:00.000Z"
-      }
-    ]
+  private getMemory(userId: string): BufferMemory {
+    if (!this.memories.has(userId)) {
+      this.memories.set(userId, new BufferMemory());
+    }
+    return this.memories.get(userId)!;
+  }
+
+  async chat(userId: string, message: string): Promise<string> {
+    const memory = this.getMemory(userId);
+    
+    const chain = new ConversationChain({
+      llm: this.model,
+      memory: memory
+    });
+
+    const response = await chain.call({ input: message });
+    return response.response;
   }
 }
 ```
 
-### 6.2 创建API配置
+### 5.2 上下文管理
 
-创建新的API配置。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `POST /api/v1/api-configs` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "api_name": "WeatherAPI",
-  "api_type": "weather",
-  "base_url": "https://api.weather.com/v1",
-  "api_key": "your-api-key",
-  "timeout": 10000,
-  "retry_count": 3,
-  "enabled": true
-}
-```
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "api_name": "WeatherAPI",
-    "api_type": "weather",
-    "enabled": true
-  }
-}
-```
-
-### 6.3 更新API配置
-
-更新指定的API配置。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `PUT /api/v1/api-configs/{config_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "base_url": "https://api.weather.com/v2",
-  "api_key": "new-api-key",
-  "timeout": 15000,
-  "enabled": true
-}
-```
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "api_name": "WeatherAPI",
-    "updated_at": "2026-03-11T11:00:00.000Z"
-  }
-}
-```
-
-### 6.4 删除API配置
-
-删除指定的API配置。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `DELETE /api/v1/api-configs/{config_id}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success"
-}
-```
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| context_max_length | 3 | 保留最近N条对话 |
+| memory_type | BufferMemory | 内存存储 |
 
 ---
 
-## 7. 系统配置接口
+## 6. 健康检查接口
 
-### 7.1 获取系统配置
-
-获取系统配置参数。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/system/configs` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "items": [
-      {
-        "config_key": "context_max_length",
-        "config_value": "3",
-        "description": "对话上下文最大条数"
-      },
-      {
-        "config_key": "llm_default_provider",
-        "config_value": "openai",
-        "description": "默认大模型提供商"
-      }
-    ]
-  }
-}
-```
-
-### 7.2 更新系统配置
-
-更新系统配置参数。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `PUT /api/v1/system/configs/{config_key}` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "config_value": "5",
-  "description": "对话上下文最大条数"
-}
-```
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "config_key": "context_max_length",
-    "config_value": "5",
-    "updated_at": "2026-03-11T11:00:00.000Z"
-  }
-}
-```
-
----
-
-## 8. 健康检查接口
-
-### 8.1 健康检查
-
-检查服务健康状态。
+### 6.1 健康检查
 
 **请求信息：**
 
@@ -916,22 +472,34 @@
 | URL | `GET /health` |
 | 认证 | 无 |
 
+**Express实现：**
+
+```typescript
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    services: {
+      line_api: 'connected',
+      llm: 'ready'
+    }
+  });
+});
+```
+
 **响应：**
 ```json
 {
   "status": "healthy",
-  "timestamp": "2026-03-11T10:00:00.000Z",
+  "timestamp": "2026-03-12T10:00:00.000Z",
   "services": {
-    "database": "healthy",
-    "redis": "healthy",
-    "line_api": "healthy"
+    "line_api": "connected",
+    "llm": "ready"
   }
 }
 ```
 
-### 8.2 就绪检查
-
-检查服务是否就绪接收请求。
+### 6.2 就绪检查
 
 **请求信息：**
 
@@ -944,212 +512,113 @@
 ```json
 {
   "ready": true,
-  "timestamp": "2026-03-11T10:00:00.000Z"
+  "timestamp": "2026-03-12T10:00:00.000Z"
 }
 ```
 
 ---
 
-## 9. 消息推送接口
+## 7. 完整服务入口
 
-### 9.1 推送消息
+### 7.1 主入口文件
 
-主动向用户推送消息。
+```typescript
+import express from 'express';
+import { middleware, Client, WebhookEvent } from '@line/bot-sdk';
+import { LLMService } from './services/llm';
+import { SchedulerService } from './services/scheduler';
+import taskConfig from './config/tasks.json';
 
-**请求信息：**
+const app = express();
+const port = process.env.PORT || 3000;
 
-| 项目 | 说明 |
-|------|------|
-| URL | `POST /api/v1/messages/push` |
-| 认证 | Bearer Token |
-| 权限 | admin |
+const lineConfig = {
+  channelSecret: process.env.LINE_CHANNEL_SECRET!,
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!
+};
 
-**请求体：**
-```json
-{
-  "target_type": "user",
-  "target_ids": ["U1234567890", "U0987654321"],
-  "messages": [
-    {
-      "type": "text",
-      "text": "这是一条推送消息"
-    }
-  ]
-}
-```
+const client = new Client(lineConfig);
+const llmService = new LLMService();
+const schedulerService = new SchedulerService(client);
 
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "sent_count": 2,
-    "failed_count": 0
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+app.post('/webhook', middleware(lineConfig), async (req, res) => {
+  try {
+    const events: WebhookEvent[] = req.body.events;
+    
+    await Promise.all(events.map(async (event) => {
+      if (event.type === 'message' && event.message.type === 'text') {
+        const userId = event.source.userId!;
+        const userMessage = event.message.text;
+        const replyToken = event.replyToken;
+        
+        const reply = await llmService.chat(userId, userMessage);
+        
+        await client.replyMessage(replyToken, {
+          type: 'text',
+          text: reply
+        });
+      }
+    }));
+    
+    res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(500).json({ status: 'error' });
   }
-}
-```
+});
 
-### 9.2 推送Flex消息
+schedulerService.loadTasks(taskConfig);
 
-推送Flex Message格式消息。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `POST /api/v1/messages/push-flex` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**请求体：**
-```json
-{
-  "target_type": "user",
-  "target_ids": ["U1234567890"],
-  "alt_text": "Flex消息",
-  "contents": {
-    "type": "bubble",
-    "body": {
-      "type": "box",
-      "layout": "vertical",
-      "contents": [
-        {
-          "type": "text",
-          "text": "Hello World"
-        }
-      ]
-    }
-  }
-}
-```
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "sent_count": 1,
-    "failed_count": 0
-  }
-}
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
 ```
 
 ---
 
-## 10. 统计接口
+## 8. 附录
 
-### 10.1 获取消息统计
+### 8.1 LINE消息类型速查
 
-获取消息处理统计数据。
+| 类型 | 结构 | 用途 |
+|------|------|------|
+| TextMessage | `{ type: 'text', text: string }` | 文本消息 |
+| ImageMessage | `{ type: 'image', originalContentUrl, previewImageUrl }` | 图片消息 |
+| FlexMessage | `{ type: 'flex', altText, contents }` | Flex消息 |
 
-**请求信息：**
+### 8.2 Cron表达式说明
 
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/statistics/messages` |
-| 认证 | Bearer Token |
-| 权限 | admin |
+| 表达式 | 说明 |
+|--------|------|
+| `0 8 * * *` | 每天8:00 |
+| `0 9,18 * * *` | 每天9:00和18:00 |
+| `*/30 * * * *` | 每30分钟 |
+| `0 0 * * 1` | 每周一0:00 |
 
-**查询参数：**
+### 8.3 环境变量配置
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| start_date | string | 是 | 开始日期 |
-| end_date | string | 是 | 结束日期 |
-| granularity | string | 否 | 粒度: day, hour |
+```bash
+# .env
+PORT=3000
 
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "total_messages": 10000,
-    "by_intent": [
-      {
-        "intent_id": "INTENT_WEATHER",
-        "count": 3000
-      },
-      {
-        "intent_id": "INTENT_UNKNOWN",
-        "count": 2000
-      }
-    ],
-    "by_date": [
-      {
-        "date": "2026-03-11",
-        "count": 500
-      }
-    ]
-  }
-}
+# LINE配置
+LINE_CHANNEL_SECRET=your-channel-secret
+LINE_CHANNEL_ACCESS_TOKEN=your-access-token
+
+# OpenAI配置
+OPENAI_API_KEY=your-openai-api-key
 ```
 
-### 10.2 获取用户统计
+### 8.4 修订历史
 
-获取用户活跃统计数据。
-
-**请求信息：**
-
-| 项目 | 说明 |
-|------|------|
-| URL | `GET /api/v1/statistics/users` |
-| 认证 | Bearer Token |
-| 权限 | admin |
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| start_date | string | 是 | 开始日期 |
-| end_date | string | 是 | 结束日期 |
-
-**响应：**
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "total_users": 1000,
-    "active_users": 500,
-    "new_users": 50,
-    "by_date": [
-      {
-        "date": "2026-03-11",
-        "active": 100,
-        "new": 5
-      }
-    ]
-  }
-}
-```
-
----
-
-## 11. 附录
-
-### 11.1 认证方式
-
-**Bearer Token认证：**
-```
-Authorization: Bearer <access_token>
-```
-
-### 11.2 请求限流
-
-| 接口类型 | 限流规则 |
-|---------|---------|
-| Webhook | 无限制（来自LINE服务器） |
-| 管理接口 | 100次/分钟/IP |
-| 公开接口 | 60次/分钟/IP |
-
-### 11.3 修订历史
-
-| 版本 | 日期 | 修订人 | 修订内容 |
-|------|------|--------|---------|
-| V1.0 | 2026-03-11 | - | 初始版本 |
+| 版本 | 日期 | 修订内容 |
+|------|------|---------|
+| V1.0 | 2026-03-11 | 初始版本 |
+| V2.0 | 2026-03-12 | 更新为 @line/bot-sdk + Express 技术栈，精简为Demo版本 |
 
 ---
 
