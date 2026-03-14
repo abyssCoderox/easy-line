@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { AppConfig, LLMConfig } from '../types';
+import { AppConfig, LLMConfig, TaskLimitConfig } from '../types';
 
 dotenv.config();
 
@@ -13,6 +13,12 @@ const DEFAULT_LLM_CONFIG: Partial<LLMConfig> = {
   retryDelay: 1000,
   fallbackResponse: '抱歉，我暂时无法回答，请稍后再试。',
   maxHistoryLength: 6,
+};
+
+const DEFAULT_TASK_LIMITS: TaskLimitConfig = {
+  maxTasksPerUser: 10,
+  minScheduleInterval: 1,
+  defaultMaxExecuteCount: undefined,
 };
 
 function getLLMConfig(): LLMConfig {
@@ -34,6 +40,16 @@ function getLLMConfig(): LLMConfig {
   };
 }
 
+function getTaskLimitConfig(): TaskLimitConfig {
+  return {
+    maxTasksPerUser: parseInt(process.env.MAX_TASKS_PER_USER || String(DEFAULT_TASK_LIMITS.maxTasksPerUser), 10),
+    minScheduleInterval: parseInt(process.env.MIN_SCHEDULE_INTERVAL || String(DEFAULT_TASK_LIMITS.minScheduleInterval), 10),
+    defaultMaxExecuteCount: process.env.DEFAULT_MAX_EXECUTE_COUNT
+      ? parseInt(process.env.DEFAULT_MAX_EXECUTE_COUNT, 10)
+      : DEFAULT_TASK_LIMITS.defaultMaxExecuteCount,
+  };
+}
+
 export const config: AppConfig = {
   port: parseInt(process.env.PORT || '3000', 10),
   line: {
@@ -41,6 +57,7 @@ export const config: AppConfig = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
   },
   llm: getLLMConfig(),
+  taskLimits: getTaskLimitConfig(),
 };
 
 export function validateConfig(): void {

@@ -19,7 +19,7 @@ export interface LogEntry {
   meta?: Record<string, any>;
 }
 
-export type LogModule = 'HTTP' | 'Scheduler' | 'LLM' | 'LINE' | 'Config' | 'Server' | 'Auth';
+export type LogModule = 'HTTP' | 'Scheduler' | 'LLM' | 'LINE' | 'Config' | 'Server' | 'Auth' | 'Webhook' | 'TaskManager' | 'Test';
 
 const DEFAULT_CONFIG: LoggerConfig = {
   level: 'info',

@@ -7,6 +7,7 @@ export interface AppConfig {
     channelAccessToken: string;
   };
   llm: LLMConfig;
+  taskLimits?: TaskLimitConfig;
 }
 
 export interface LLMConfig {
@@ -76,6 +77,65 @@ export interface TaskExecutionLog {
   status: 'success' | 'failed';
   duration?: number;
   error?: string;
+}
+
+export interface UserTaskConfig {
+  taskId: string;
+  userId: string;
+  taskName: string;
+  schedule: string;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  messageTemplate: string;
+  lastExecuteTime?: Date;
+  nextExecuteTime?: Date;
+  executeCount: number;
+  maxExecuteCount?: number;
+}
+
+export interface TaskCreateRequest {
+  userId: string;
+  input: string;
+  inputType?: 'command' | 'natural';
+}
+
+export interface TaskCreateResponse {
+  success: boolean;
+  taskId?: string;
+  taskName?: string;
+  schedule?: string;
+  scheduleDescription?: string;
+  nextExecuteTime?: Date;
+  message?: string;
+}
+
+export interface IntentResult {
+  intent: 'create_task' | 'list_tasks' | 'delete_task' | 'update_task' | 'unknown' | 'chat';
+  confidence: number;
+  entities?: {
+    schedule?: string;
+    scheduleDescription?: string;
+    taskId?: string;
+    taskName?: string;
+  };
+}
+
+export interface CommandParseResult {
+  command: 'create' | 'list' | 'delete' | 'enable' | 'disable' | 'help' | null;
+  params: {
+    schedule?: string;
+    taskName?: string;
+    taskId?: string;
+    enabled?: boolean;
+  };
+  error?: string;
+}
+
+export interface TaskLimitConfig {
+  maxTasksPerUser: number;
+  minScheduleInterval: number;
+  defaultMaxExecuteCount?: number;
 }
 
 export type TextMessage = line.TextMessage;
