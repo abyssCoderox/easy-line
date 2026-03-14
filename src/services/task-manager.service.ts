@@ -1,5 +1,7 @@
 import cron from 'node-cron';
 import { v4 as uuidv4 } from 'uuid';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   UserTaskConfig,
   TaskCreateRequest,
@@ -22,6 +24,17 @@ const DEFAULT_LIMIT_CONFIG: TaskLimitConfig = {
   minScheduleInterval: 1,
 };
 
+const TASKS_DATA_FILE = path.join(process.cwd(), 'data', 'tasks.json');
+
+interface PersistedTasksData {
+  version: number;
+  updatedAt: string;
+  userTasks: Array<{
+    userId: string;
+    tasks: UserTaskConfig[];
+  }>;
+}
+
 export class TaskManagerService {
   private userTasks: Map<string, UserTaskConfig[]> = new Map();
   private scheduledTasks: Map<string, cron.ScheduledTask> = new Map();
@@ -29,6 +42,74 @@ export class TaskManagerService {
 
   constructor(limitConfig: TaskLimitConfig = DEFAULT_LIMIT_CONFIG) {
     this.limitConfig = limitConfig;
+    this.loadTasks();
+  }
+
+  private loadTasks(): void {
+    try {
+      const dataDir = path.dirname(TASKS_DATA_FILE);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
+      if (!fs.existsSync(TASKS_DATA_FILE)) {
+        return;
+      }
+
+      const data = fs.readFileSync(TASKS_DATA_FILE, 'utf-8');
+      const parsed: PersistedTasksData = JSON.parse(data);
+
+      if (parsed.userTasks && Array.isArray(parsed.userTasks)) {
+        for (const userTask of parsed.userTasks) {
+          const tasks = userTask.tasks.map(task => ({
+            ...task,
+            createdAt: new Date(task.createdAt),
+            updatedAt: new Date(task.updatedAt),
+            lastExecuteTime: task.lastExecuteTime ? new Date(task.lastExecuteTime) : undefined,
+            nextExecuteTime: task.nextExecuteTime ? new Date(task.nextExecuteTime) : undefined,
+          }));
+          this.userTasks.set(userTask.userId, tasks);
+
+          for (const task of tasks) {
+            if (task.enabled) {
+              const scheduledTask = cron.schedule(task.schedule, () => {
+                this.executeTask(task.taskId);
+              });
+              this.scheduledTasks.set(task.taskId, scheduledTask);
+            }
+          }
+        }
+      }
+
+      logger.info('TaskManager', 'Tasks loaded from disk', {
+        totalTasks: this.getStats().totalTasks,
+      });
+    } catch (error: any) {
+      logger.error('TaskManager', 'Failed to load tasks', { error: error.message });
+    }
+  }
+
+  private persistTasks(): void {
+    try {
+      const dataDir = path.dirname(TASKS_DATA_FILE);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
+      const data: PersistedTasksData = {
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        userTasks: [],
+      };
+
+      for (const [userId, tasks] of this.userTasks.entries()) {
+        data.userTasks.push({ userId, tasks });
+      }
+
+      fs.writeFileSync(TASKS_DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (error: any) {
+      logger.error('TaskManager', 'Failed to persist tasks', { error: error.message });
+    }
   }
 
   async processInput(userId: string, input: string): Promise<TaskCreateResponse> {
@@ -167,6 +248,8 @@ export class TaskManagerService {
       taskName: options.taskName,
     });
     
+    this.persistTasks();
+    
     return {
       success: true,
       taskId,
@@ -214,6 +297,8 @@ export class TaskManagerService {
     
     this.removeUserTask(userId, taskId);
     
+    this.persistTasks();
+    
     logger.info('TaskManager', 'Task deleted', {
       taskId,
       userId: this.maskUserId(userId),
@@ -231,6 +316,8 @@ export class TaskManagerService {
     
     task.enabled = enabled;
     task.updatedAt = new Date();
+    
+    this.persistTasks();
     
     if (enabled) {
       if (!this.scheduledTasks.has(taskId)) {
@@ -277,9 +364,14 @@ export class TaskManagerService {
       const duration = Date.now() - startTime;
       logger.task(taskId, task.taskName, 'success', duration);
       
+      this.persistTasks();
+      
     } catch (error: any) {
       const duration = Date.now() - startTime;
       logger.task(taskId, task.taskName, 'failed', duration, error.message);
+      
+      task.nextExecuteTime = calculateNextExecuteTime(task.schedule) || undefined;
+      this.persistTasks();
     }
   }
 
