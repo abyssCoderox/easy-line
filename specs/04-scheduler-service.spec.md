@@ -51,7 +51,7 @@
       "id": "weather-push",
       "name": "每日天气推送",
       "enabled": true,
-      "schedule": "0 8 * * *",
+      "schedule": "0 0 8 * * *",
       "api": {
         "url": "https://api.openweathermap.org/data/2.5/weather",
         "method": "GET",
@@ -61,10 +61,25 @@
       },
       "template": "早安！今日天气: {weather}, 温度: {temp}°C",
       "targets": ["U1234567890abcdef"]
+    },
+    {
+      "id": "health-check",
+      "name": "健康检查（每30秒）",
+      "enabled": true,
+      "schedule": "*/30 * * * * *",
+      "api": {
+        "url": "https://api.example.com/health",
+        "method": "GET",
+        "headers": {}
+      },
+      "template": "健康检查: {status}",
+      "targets": ["U1234567890abcdef"]
     }
   ]
 }
 ```
+
+> **注意：** 支持 5 字段（分 时 日 月 周）和 6 字段（秒 分 时 日 月 周）两种格式。
 
 ### 3.2 SchedulerService 类实现
 
@@ -234,9 +249,16 @@ describe('SchedulerService', () => {
     expect(service.getTaskStatus().length).toBeGreaterThan(0);
   });
   
-  it('should validate cron expression', () => {
+  it('should validate cron expression (5 fields)', () => {
     expect(cron.validate('0 8 * * *')).toBe(true);
     expect(cron.validate('invalid')).toBe(false);
+  });
+  
+  it('should validate cron expression (6 fields with seconds)', () => {
+    expect(cron.validate('*/10 * * * * *')).toBe(true);
+    expect(cron.validate('* * * * * *')).toBe(true);
+    expect(cron.validate('0 0 8 * * *')).toBe(true);
+    expect(cron.validate('15 30 14 * * *')).toBe(true);
   });
   
   it('should render template correctly', () => {
@@ -244,6 +266,17 @@ describe('SchedulerService', () => {
     const data = { weather: '晴', temp: 25 };
     const result = renderTemplate(template, data);
     expect(result).toBe('天气: 晴, 温度: 25°C');
+  });
+  
+  it('should detect second-level cron expressions', () => {
+    expect(isSecondLevelCron('*/10 * * * * *')).toBe(true);
+    expect(isSecondLevelCron('0 8 * * *')).toBe(false);
+  });
+  
+  it('should describe second-level cron expressions', () => {
+    expect(getCronDescription('*/10 * * * * *')).toBe('每 10 秒');
+    expect(getCronDescription('* * * * * *')).toBe('每秒');
+    expect(getCronDescription('30 * * * * *')).toBe('每分钟的第 30 秒');
   });
 });
 ```
@@ -266,6 +299,8 @@ curl http://localhost:3000/api/tasks
 
 ## 7. Cron 表达式参考
 
+### 7.1 标准格式（5 字段：分 时 日 月 周）
+
 | 表达式 | 说明 |
 |--------|------|
 | `0 8 * * *` | 每天 8:00 |
@@ -273,6 +308,32 @@ curl http://localhost:3000/api/tasks
 | `*/30 * * * *` | 每 30 分钟 |
 | `0 0 * * 1` | 每周一 0:00 |
 | `0 0 1 * *` | 每月 1 号 0:00 |
+
+### 7.2 秒级格式（6 字段：秒 分 时 日 月 周）
+
+| 表达式 | 说明 |
+|--------|------|
+| `* * * * * *` | 每秒 |
+| `*/10 * * * * *` | 每 10 秒 |
+| `*/30 * * * * *` | 每 30 秒 |
+| `0 * * * * *` | 每分钟整点 |
+| `30 * * * * *` | 每分钟的第 30 秒 |
+| `0 0 * * * *` | 每小时整点 |
+| `0 0 8 * * *` | 每天 8:00:00 |
+| `0 30 8 * * *` | 每天 8:30:00 |
+| `15 30 14 * * *` | 每天 14:30:15 |
+
+### 7.3 自然语言支持
+
+| 输入 | 转换结果 |
+|------|---------|
+| "每秒" | `* * * * * *` |
+| "每10秒" | `*/10 * * * * *` |
+| "每分钟" | `0 * * * * *` |
+| "每5分钟" | `0 */5 * * * *` |
+| "每天9点" | `0 0 9 * * *` |
+| "每天9点30分" | `0 30 9 * * *` |
+| "每天9点30分15秒" | `15 30 9 * * *` |
 
 ---
 

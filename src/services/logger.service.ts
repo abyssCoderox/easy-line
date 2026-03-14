@@ -39,10 +39,24 @@ export class LoggerService {
   private config: LoggerConfig;
   private writeQueue: LogEntry[] = [];
   private isProcessing: boolean = false;
+  private timezone: string;
 
   constructor(config: Partial<LoggerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.timezone = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
     this.ensureLogDirectories();
+  }
+
+  private formatLocalTimestamp(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const ms = String(now.getMilliseconds()).padStart(3, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${ms}`;
   }
 
   private ensureLogDirectories(): void {
@@ -73,7 +87,7 @@ export class LoggerService {
     }
 
     const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
+      timestamp: this.formatLocalTimestamp(),
       level,
       module,
       message,
@@ -210,7 +224,8 @@ export class LoggerService {
   }
 
   getLogFilePath(level: LogLevel): string {
-    const date = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     return path.join(this.config.dir, level, `${level}-${date}.log`);
   }
 }
