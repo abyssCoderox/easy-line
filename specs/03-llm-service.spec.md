@@ -15,18 +15,19 @@
 
 ## 1. 任务目标
 
-实现大模型服务模块，集成 LangChain.js 框架，提供智能对话能力和上下文管理功能。
+实现大模型服务模块，集成 LangChain.js 1.x 框架，提供智能对话能力和上下文管理功能。
 
 ## 2. 任务范围
 
 ### 2.1 包含内容
 
 - [ ] LLMService 类实现
-- [ ] LangChain 集成
+- [ ] LangChain 1.x 集成
 - [ ] 对话生成功能
-- [ ] 上下文管理（BufferMemory）
+- [ ] 上下文管理（ChatMessageHistory）
 - [ ] 降级回复机制
 - [ ] 会话管理
+- [ ] 配置化管理
 
 ### 2.2 不包含内容
 
@@ -44,55 +45,75 @@
 
 ```typescript
 import { ChatOpenAI } from '@langchain/openai';
-import { ConversationChain } from 'langchain/chains';
-import { BufferMemory, ChatMessageHistory } from 'langchain/memory';
-import { HumanMessage, AIMessage } from '@langchain/core/messages';
+import { InMemoryChatMessageHistory } from '@langchain/core/chat_history';
+import { HumanMessage, AIMessage, BaseMessage } from '@langchain/core/messages';
 import { config } from '../config';
-
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
+import { LLMConfig, ChatMessage } from '../types';
 
 export class LLMService {
   private model: ChatOpenAI;
-  private sessions: Map<string, BufferMemory> = new Map();
-  private readonly maxHistoryLength: number = 6;
-  
+  private sessions: Map<string, InMemoryChatMessageHistory> = new Map();
+  private readonly llmConfig: LLMConfig;
+
   constructor() {
-    this.model = new ChatOpenAI({
-      modelName: 'gpt-3.5-turbo',
-      temperature: 0.7,
-      openAIApiKey: config.openai.apiKey,
-      maxTokens: 1000,
-    });
+    this.llmConfig = config.llm;
+    this.model = this.createModel();
+  }
+
+  private createModel(): ChatOpenAI {
+    const modelConfig: ConstructorParameters<typeof ChatOpenAI>[0] = {
+      model: this.llmConfig.model,
+      temperature: this.llmConfig.temperature,
+      maxTokens: this.llmConfig.maxTokens,
+      apiKey: this.llmConfig.apiKey,
+      timeout: this.llmConfig.timeout,
+      maxRetries: 0,
+    };
+
+    if (this.llmConfig.apiBaseUrl) {
+      modelConfig.configuration = {
+        baseURL: this.llmConfig.apiBaseUrl,
+      };
+    }
+
+    return new ChatOpenAI(modelConfig);
   }
   
   async chat(userId: string, message: string): Promise<string> {
-    try {
-      const memory = this.getOrCreateMemory(userId);
-      
-      const chain = new ConversationChain({
-        llm: this.model,
-        memory: memory,
-      });
-      
-      const response = await chain.call({ input: message });
-      return response.response;
-    } catch (error) {
-      console.error('LLM chat error:', error);
-      return this.getFallbackResponse();
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= this.llmConfig.maxRetries!; attempt++) {
+      try {
+        const history = this.getOrCreateHistory(userId);
+        
+        const pastMessages = await history.getMessages();
+        const messages: BaseMessage[] = [...pastMessages, new HumanMessage(message)];
+        
+        const response = await this.model.invoke(messages);
+        
+        await history.addMessage(new HumanMessage(message));
+        await history.addMessage(new AIMessage(response.content as string));
+        
+        await this.trimHistory(userId);
+        
+        return response.content as string;
+      } catch (error: any) {
+        lastError = error;
+        console.error(`LLM chat error (attempt ${attempt + 1}/${this.llmConfig.maxRetries! + 1}):`, error.message);
+        
+        if (attempt < this.llmConfig.maxRetries!) {
+          await this.sleep(this.llmConfig.retryDelay! * (attempt + 1));
+        }
+      }
     }
+    
+    console.error('LLM chat failed after all retries:', lastError);
+    return this.getFallbackResponse();
   }
   
-  private getOrCreateMemory(userId: string): BufferMemory {
+  private getOrCreateHistory(userId: string): ChatMessageHistory {
     if (!this.sessions.has(userId)) {
-      this.sessions.set(userId, new BufferMemory({
-        returnMessages: true,
-        memoryKey: 'history',
-        inputKey: 'input',
-        outputKey: 'output',
-      }));
+      this.sessions.set(userId, new ChatMessageHistory());
     }
     return this.sessions.get(userId)!;
   }
@@ -101,18 +122,28 @@ export class LLMService {
     this.sessions.delete(userId);
   }
   
-  getSessionHistory(userId: string): ChatMessage[] {
-    const memory = this.sessions.get(userId);
-    if (!memory) return [];
+  async getSessionHistory(userId: string): Promise<ChatMessage[]> {
+    const history = this.sessions.get(userId);
+    if (!history) return [];
     
-    const history = memory.chatHistory;
-    return history.messages.map((msg: any) => ({
-      role: msg._getType() === 'human' ? 'user' : 'assistant',
-      content: msg.content,
-    }));
+    const messages = await history.getMessages();
+    const result: ChatMessage[] = [];
+    
+    for (const msg of messages) {
+      const content = typeof msg.content === 'string' 
+        ? msg.content 
+        : JSON.stringify(msg.content);
+      const role = msg._getType() === 'human' ? 'user' : 'assistant';
+      result.push({ role, content });
+    }
+    
+    return result;
   }
   
   private getFallbackResponse(): string {
+    if (this.llmConfig.fallbackResponse) {
+      return this.llmConfig.fallbackResponse;
+    }
     const fallbacks = [
       '抱歉，我暂时无法回答，请稍后再试。',
       '系统繁忙，请稍后再试。',
@@ -123,6 +154,10 @@ export class LLMService {
   
   getActiveSessionCount(): number {
     return this.sessions.size;
+  }
+
+  getConfig(): LLMConfig {
+    return { ...this.llmConfig };
   }
 }
 
@@ -135,10 +170,17 @@ export const llmService = new LLMService();
 
 ```typescript
 export interface LLMConfig {
+  provider: 'openai' | 'anthropic' | 'azure' | 'custom';
+  model: string;
   apiKey: string;
-  model?: string;
+  apiBaseUrl?: string;
   temperature?: number;
   maxTokens?: number;
+  timeout?: number;
+  maxRetries?: number;
+  retryDelay?: number;
+  fallbackResponse?: string;
+  maxHistoryLength?: number;
 }
 
 export interface ChatSession {
@@ -160,18 +202,49 @@ export interface ChatMessage {
 **更新 src/config/index.ts:**
 
 ```typescript
+import dotenv from 'dotenv';
+import { AppConfig, LLMConfig } from '../types';
+
+dotenv.config();
+
+const DEFAULT_LLM_CONFIG: Partial<LLMConfig> = {
+  provider: 'openai',
+  model: 'gpt-3.5-turbo',
+  temperature: 0.7,
+  maxTokens: 1000,
+  timeout: 30000,
+  maxRetries: 3,
+  retryDelay: 1000,
+  fallbackResponse: '抱歉，我暂时无法回答，请稍后再试。',
+  maxHistoryLength: 6,
+};
+
+function getLLMConfig(): LLMConfig {
+  const provider = (process.env.LLM_PROVIDER as LLMConfig['provider']) || 'openai';
+  const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+  
+  return {
+    provider,
+    model: process.env.LLM_MODEL || DEFAULT_LLM_CONFIG.model!,
+    apiKey,
+    apiBaseUrl: process.env.LLM_API_BASE_URL || process.env.OPENAI_API_BASE,
+    temperature: parseFloat(process.env.LLM_TEMPERATURE || String(DEFAULT_LLM_CONFIG.temperature)),
+    maxTokens: parseInt(process.env.LLM_MAX_TOKENS || String(DEFAULT_LLM_CONFIG.maxTokens), 10),
+    timeout: parseInt(process.env.LLM_TIMEOUT || String(DEFAULT_LLM_CONFIG.timeout), 10),
+    maxRetries: parseInt(process.env.LLM_MAX_RETRIES || String(DEFAULT_LLM_CONFIG.maxRetries), 10),
+    retryDelay: parseInt(process.env.LLM_RETRY_DELAY || String(DEFAULT_LLM_CONFIG.retryDelay), 10),
+    fallbackResponse: process.env.LLM_FALLBACK_RESPONSE || DEFAULT_LLM_CONFIG.fallbackResponse,
+    maxHistoryLength: parseInt(process.env.LLM_MAX_HISTORY_LENGTH || String(DEFAULT_LLM_CONFIG.maxHistoryLength), 10),
+  };
+}
+
 export const config: AppConfig = {
   port: parseInt(process.env.PORT || '3000', 10),
   line: {
     channelSecret: process.env.LINE_CHANNEL_SECRET!,
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
   },
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY!,
-    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
-    temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7'),
-    maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '1000', 10),
-  },
+  llm: getLLMConfig(),
 };
 ```
 
@@ -217,7 +290,7 @@ console.log(reply);
 |------|------|------|
 | userId | string | 用户ID |
 
-**返回值：** ChatMessage[]
+**返回值：** Promise<ChatMessage[]>
 
 ---
 
@@ -231,6 +304,7 @@ console.log(reply);
 - [ ] 会话隔离正确
 - [ ] 降级回复正常工作
 - [ ] API 错误时返回降级回复
+- [ ] 配置参数正确读取
 
 ### 5.2 性能验收
 
@@ -291,7 +365,7 @@ describe('LLM Integration', () => {
 | 错误类型 | 处理方式 |
 |---------|---------|
 | API Key 无效 | 启动时验证，抛出错误 |
-| 网络超时 | 返回降级回复 |
+| 网络超时 | 重试机制，返回降级回复 |
 | Token 超限 | 返回降级回复 |
 | 模型不可用 | 返回降级回复 |
 
@@ -299,8 +373,8 @@ describe('LLM Integration', () => {
 
 ```typescript
 try {
-  const response = await chain.call({ input: message });
-  return response.response;
+  const response = await this.model.invoke(messages);
+  return response.content as string;
 } catch (error: any) {
   console.error('LLM chat error:', {
     userId,
@@ -314,7 +388,32 @@ try {
 
 ---
 
-## 8. 风险与注意事项
+## 8. 配置参数说明
+
+### 8.1 环境变量
+
+| 变量名 | 说明 | 默认值 | 取值范围 |
+|--------|------|--------|---------|
+| LLM_PROVIDER | 模型提供商 | openai | openai, anthropic, azure, custom |
+| LLM_API_KEY | API密钥 | - | 必填 |
+| LLM_MODEL | 模型名称 | gpt-3.5-turbo | - |
+| LLM_API_BASE_URL | API基础URL | - | 可选，用于自定义端点 |
+| LLM_TEMPERATURE | 温度参数 | 0.7 | 0-2 |
+| LLM_MAX_TOKENS | 最大Token数 | 1000 | >= 1 |
+| LLM_TIMEOUT | 请求超时(ms) | 30000 | >= 1000 |
+| LLM_MAX_RETRIES | 最大重试次数 | 3 | >= 0 |
+| LLM_RETRY_DELAY | 重试延迟(ms) | 1000 | >= 0 |
+| LLM_FALLBACK_RESPONSE | 降级回复 | - | - |
+| LLM_MAX_HISTORY_LENGTH | 历史消息长度 | 6 | >= 1 |
+
+### 8.2 向后兼容
+
+- `OPENAI_API_KEY` 可替代 `LLM_API_KEY`
+- `OPENAI_API_BASE` 可替代 `LLM_API_BASE_URL`
+
+---
+
+## 9. 风险与注意事项
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|---------|
@@ -325,7 +424,7 @@ try {
 
 ---
 
-## 9. 输出物
+## 10. 输出物
 
 - [ ] src/services/llm.service.ts
 - [ ] 更新 src/types/index.ts

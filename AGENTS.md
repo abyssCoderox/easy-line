@@ -28,7 +28,7 @@
 | 语言 | TypeScript | 5.x |
 | Web框架 | Express | 4.x |
 | LINE SDK | @line/bot-sdk | 7.x |
-| LLM框架 | LangChain.js | 0.1.x |
+| LLM框架 | LangChain.js | 1.x |
 | 定时任务 | node-cron | 3.x |
 | HTTP客户端 | axios | 1.x |
 
@@ -254,7 +254,7 @@ const config = {
 
 ```typescript
 // 使用 Map 存储会话
-private sessions: Map<string, BufferMemory> = new Map();
+private sessions: Map<string, InMemoryChatMessageHistory> = new Map();
 
 // 使用 Map 存储任务
 private tasks: Map<string, cron.ScheduledTask> = new Map();
@@ -470,7 +470,20 @@ NODE_ENV=development
 LINE_CHANNEL_SECRET=your-channel-secret
 LINE_CHANNEL_ACCESS_TOKEN=your-access-token
 
-# OpenAI配置
+# LLM配置
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-your-api-key
+LLM_MODEL=gpt-3.5-turbo
+LLM_API_BASE_URL=
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=1000
+LLM_TIMEOUT=30000
+LLM_MAX_RETRIES=3
+LLM_RETRY_DELAY=1000
+LLM_FALLBACK_RESPONSE=抱歉，我暂时无法回答，请稍后再试。
+LLM_MAX_HISTORY_LENGTH=6
+
+# 向后兼容（旧配置名）
 OPENAI_API_KEY=sk-your-api-key
 
 # 第三方API密钥（可选）
@@ -481,16 +494,28 @@ WEATHER_API_KEY=your-weather-api-key
 
 ```typescript
 export function validateConfig(): void {
-  const required = [
-    'LINE_CHANNEL_SECRET',
-    'LINE_CHANNEL_ACCESS_TOKEN',
-    'OPENAI_API_KEY',
-  ];
+  const errors: string[] = [];
   
-  const missing = required.filter(key => !process.env[key]);
+  if (!process.env.LINE_CHANNEL_SECRET) {
+    errors.push('LINE_CHANNEL_SECRET is required');
+  }
   
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+    errors.push('LINE_CHANNEL_ACCESS_TOKEN is required');
+  }
+  
+  if (!config.llm.apiKey) {
+    errors.push('LLM_API_KEY or OPENAI_API_KEY is required');
+  }
+  
+  if (config.llm.temperature !== undefined) {
+    if (config.llm.temperature < 0 || config.llm.temperature > 2) {
+      errors.push('LLM_TEMPERATURE must be between 0 and 2');
+    }
+  }
+  
+  if (errors.length > 0) {
+    throw new Error(`Configuration validation failed:\n  - ${errors.join('\n  - ')}`);
   }
 }
 ```

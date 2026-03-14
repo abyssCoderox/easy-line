@@ -122,8 +122,9 @@ npm install express@^4.18.2
 npm install dotenv@^16.3.1
 npm install node-cron@^3.0.3
 npm install axios@^1.6.0
-npm install langchain@^0.1.0
-npm install @langchain/openai@^0.0.19
+npm install langchain@^1.2.0
+npm install @langchain/openai@^1.2.0
+npm install @langchain/core@^1.1.0
 ```
 
 **开发依赖：**
@@ -148,7 +149,20 @@ NODE_ENV=development
 LINE_CHANNEL_SECRET=your-channel-secret
 LINE_CHANNEL_ACCESS_TOKEN=your-access-token
 
-# OpenAI配置
+# LLM配置
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-your-openai-api-key
+LLM_MODEL=gpt-3.5-turbo
+LLM_API_BASE_URL=
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=1000
+LLM_TIMEOUT=30000
+LLM_MAX_RETRIES=3
+LLM_RETRY_DELAY=1000
+LLM_FALLBACK_RESPONSE=抱歉，我暂时无法回答，请稍后再试。
+LLM_MAX_HISTORY_LENGTH=6
+
+# 向后兼容（旧配置名）
 OPENAI_API_KEY=sk-your-openai-api-key
 
 # 第三方API密钥（可选）
@@ -190,9 +204,21 @@ export interface AppConfig {
     channelSecret: string;
     channelAccessToken: string;
   };
-  openai: {
-    apiKey: string;
-  };
+  llm: LLMConfig;
+}
+
+export interface LLMConfig {
+  provider: 'openai' | 'anthropic' | 'azure' | 'custom';
+  model: string;
+  apiKey: string;
+  apiBaseUrl?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeout?: number;
+  maxRetries?: number;
+  retryDelay?: number;
+  fallbackResponse?: string;
+  maxHistoryLength?: number;
 }
 
 export interface TaskConfig {

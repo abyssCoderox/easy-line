@@ -2,16 +2,19 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { config, validateConfig } from './config';
 import { schedulerService } from './services/scheduler.service';
+import { logger } from './services/logger.service';
 import webhookRoutes from './routes/webhook';
 import apiRoutes from './routes/api';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { loggingMiddleware } from './middleware/logging.middleware';
 
 dotenv.config();
 
 try {
   validateConfig();
-} catch (error) {
-  console.error('Config validation failed:', error);
+  logger.info('Config', 'Configuration validated successfully');
+} catch (error: any) {
+  logger.error('Config', 'Configuration validation failed', { error: error.message });
   process.exit(1);
 }
 
@@ -39,6 +42,8 @@ app.get('/ready', (req, res) => {
   });
 });
 
+app.use(loggingMiddleware);
+
 app.use('/webhook', webhookRoutes);
 app.use('/api', apiRoutes);
 
@@ -48,15 +53,24 @@ app.use(errorHandler);
 const PORT = config.port;
 
 const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  logger.info('Server', `Server started`, { port: PORT });
   schedulerService.loadTasks();
 });
 
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...');
+  logger.info('Server', 'SIGTERM received, shutting down...');
   schedulerService.stopAll();
   server.close(() => {
-    console.log('Server closed');
+    logger.info('Server', 'Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  logger.info('Server', 'SIGINT received, shutting down...');
+  schedulerService.stopAll();
+  server.close(() => {
+    logger.info('Server', 'Server closed');
     process.exit(0);
   });
 });

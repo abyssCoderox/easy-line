@@ -6,9 +6,43 @@ export interface AppConfig {
     channelSecret: string;
     channelAccessToken: string;
   };
-  openai: {
-    apiKey: string;
-  };
+  llm: LLMConfig;
+}
+
+export interface LLMConfig {
+  provider: 'openai' | 'anthropic' | 'azure' | 'custom';
+  model: string;
+  apiKey: string;
+  apiBaseUrl?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeout?: number;
+  maxRetries?: number;
+  retryDelay?: number;
+  fallbackResponse?: string;
+  maxHistoryLength?: number;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatRequest {
+  userId: string;
+  message: string;
+}
+
+export interface ChatResponseData {
+  userId: string;
+  reply: string;
+  timestamp: string;
+}
+
+export interface ChatResponse {
+  code: 0;
+  message: 'success';
+  data: ChatResponseData;
 }
 
 export interface TaskConfig {

@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import axios from 'axios';
 import { TaskConfig, TaskExecutionLog, TaskConfigFile } from '../types';
 import { lineService } from './line.service';
+import { logger } from './logger.service';
 
 import * as taskConfigFile from '../config/tasks.json';
 
@@ -14,12 +15,15 @@ export class SchedulerService {
     
     for (const config of configs) {
       if (!config.enabled) {
-        console.log(`Task skipped (disabled): ${config.name}`);
+        logger.warn('Scheduler', `Task skipped (disabled): ${config.name}`, { taskId: config.id });
         continue;
       }
       
       if (!cron.validate(config.schedule)) {
-        console.error(`Invalid cron: ${config.schedule} for task: ${config.name}`);
+        logger.error('Scheduler', `Invalid cron expression`, { 
+          taskId: config.id, 
+          schedule: config.schedule 
+        });
         continue;
       }
       
@@ -28,7 +32,11 @@ export class SchedulerService {
       });
       
       this.tasks.set(config.id, task);
-      console.log(`Task loaded: ${config.name} (${config.schedule})`);
+      logger.info('Scheduler', `Task loaded`, { 
+        taskId: config.id, 
+        taskName: config.name, 
+        schedule: config.schedule 
+      });
     }
   }
 
@@ -56,12 +64,13 @@ export class SchedulerService {
       }]);
       
       log.duration = Date.now() - startTime;
-      console.log(`Task completed: ${config.name} (${log.duration}ms)`);
+      logger.task(config.id, config.name, 'success', log.duration);
       
     } catch (error: any) {
       log.status = 'failed';
       log.error = error.message;
-      console.error(`Task failed: ${config.name}`, error);
+      log.duration = Date.now() - startTime;
+      logger.task(config.id, config.name, 'failed', log.duration, error.message);
     }
     
     this.logs.push(log);
@@ -87,9 +96,10 @@ export class SchedulerService {
   stopAll(): void {
     for (const [id, task] of this.tasks) {
       task.stop();
+      logger.info('Scheduler', `Task stopped`, { taskId: id });
     }
     this.tasks.clear();
-    console.log('All tasks stopped');
+    logger.info('Scheduler', 'All tasks stopped');
   }
 }
 
