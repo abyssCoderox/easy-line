@@ -3,6 +3,7 @@ import axios from 'axios';
 import { TaskConfig, TaskExecutionLog, TaskConfigFile } from '../types';
 import { lineService } from './line.service';
 import { logger } from './logger.service';
+import { llmService } from './llm.service';
 
 import * as taskConfigFile from '../config/tasks.json';
 
@@ -62,6 +63,10 @@ export class SchedulerService {
         type: 'text',
         text: message,
       }]);
+      
+      for (const target of config.targets) {
+        await llmService.addSystemMessage(target, message);
+      }
       
       log.duration = Date.now() - startTime;
       logger.task(config.id, config.name, 'success', log.duration);

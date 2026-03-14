@@ -18,6 +18,7 @@ import {
 } from '../utils/cron-utils';
 import { lineService } from './line.service';
 import { logger } from './logger.service';
+import { llmService } from './llm.service';
 
 const DEFAULT_LIMIT_CONFIG: TaskLimitConfig = {
   maxTasksPerUser: 10,
@@ -356,6 +357,8 @@ export class TaskManagerService {
         type: 'text',
         text: message,
       }]);
+      
+      await llmService.addSystemMessage(task.userId, message);
       
       task.executeCount++;
       task.lastExecuteTime = new Date();

@@ -292,6 +292,39 @@ console.log(reply);
 
 **返回值：** Promise<ChatMessage[]>
 
+### 4.4 addSystemMessage()
+
+向用户会话中添加系统消息，用于将定时任务推送的消息纳入上下文管理。
+
+**参数：**
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| userId | string | 用户ID |
+| message | string | 系统消息内容 |
+
+**返回值：** Promise<void>
+
+**使用场景：**
+- 定时任务推送消息后，将消息纳入用户上下文
+- 系统通知需要被 AI 感知的场景
+
+**使用示例：**
+```typescript
+// 定时任务推送后，将消息纳入上下文
+const timeMessage = '⏰ 时间提醒\n当前时间：2026-03-15 10:00:00\n星期五';
+await lineService.pushMessage(userId, [{ type: 'text', text: timeMessage }]);
+await llmService.addSystemMessage(userId, timeMessage);
+
+// 用户后续可以询问
+// 用户: "刚才提醒我什么了？"
+// AI: "刚才提醒您当前时间是 2026-03-15 10:00:00，星期五。"
+```
+
+**注意事项：**
+- 系统消息以 AIMessage 形式存储，带有 `[系统消息]` 前缀
+- 会触发历史消息裁剪，确保不会超出 maxHistoryLength 限制
+- 如果用户会话不存在，会自动创建
+
 ---
 
 ## 5. 验收标准

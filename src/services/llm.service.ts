@@ -115,6 +115,12 @@ export class LLMService {
     return result;
   }
 
+  async addSystemMessage(userId: string, message: string): Promise<void> {
+    const history = this.getOrCreateHistory(userId);
+    await history.addMessage(new AIMessage(`[系统消息] ${message}`));
+    await this.trimHistory(userId);
+  }
+
   private getFallbackResponse(): string {
     if (this.llmConfig.fallbackResponse) {
       return this.llmConfig.fallbackResponse;
