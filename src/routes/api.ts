@@ -1,11 +1,10 @@
 import { Router } from 'express';
 import { schedulerService } from '../services/scheduler.service';
 import { lineService } from '../services/line.service';
-import { llmService } from '../services/llm.service';
 import { taskManagerService } from '../services/task-manager.service';
+import { agentService } from '../services/agent.service';
 import { authenticateApiKey } from '../middleware/auth.middleware';
 import { ChatRequest, ChatResponse, UserTaskConfig } from '../types';
-import { isCommand } from '../utils/command-parser';
 
 const router = Router();
 
@@ -178,66 +177,7 @@ router.post('/chat', authenticateApiKey, async (req, res) => {
   }
   
   try {
-    if (isCommand(message)) {
-      const taskResult = await taskManagerService.processInput(userId, message);
-      
-      const response: ChatResponse = {
-        code: 0,
-        message: 'success',
-        data: {
-          userId,
-          reply: taskResult.message || '命令处理完成',
-          timestamp: new Date().toISOString(),
-          ...(taskResult.taskId && {
-            taskInfo: {
-              taskId: taskResult.taskId,
-              taskName: taskResult.taskName,
-              schedule: taskResult.schedule,
-              nextExecuteTime: taskResult.nextExecuteTime,
-            },
-          }),
-        },
-      };
-      
-      return res.json(response);
-    }
-    
-    const intentResult = await llmService.recognizeIntent(message);
-    
-    if (intentResult.intent === 'create_task' && intentResult.confidence > 0.7) {
-      const { schedule, scheduleDescription, taskName } = intentResult.entities || {};
-      
-      if (schedule) {
-        const taskResult = await taskManagerService.createTaskFromNaturalLanguage(
-          userId,
-          schedule,
-          scheduleDescription,
-          taskName
-        );
-        
-        const response: ChatResponse = {
-          code: 0,
-          message: 'success',
-          data: {
-            userId,
-            reply: taskResult.message || '任务创建完成',
-            timestamp: new Date().toISOString(),
-            ...(taskResult.taskId && {
-              taskInfo: {
-                taskId: taskResult.taskId,
-                taskName: taskResult.taskName,
-                schedule: taskResult.schedule,
-                nextExecuteTime: taskResult.nextExecuteTime,
-              },
-            }),
-          },
-        };
-        
-        return res.json(response);
-      }
-    }
-    
-    const reply = await llmService.chat(userId, message);
+    const reply = await agentService.run(message, userId);
     
     const response: ChatResponse = {
       code: 0,

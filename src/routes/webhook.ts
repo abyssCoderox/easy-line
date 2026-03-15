@@ -1,9 +1,7 @@
 import { Router } from 'express';
 import { lineService } from '../services/line.service';
-import { llmService } from '../services/llm.service';
-import { taskManagerService } from '../services/task-manager.service';
+import { agentService } from '../services/agent.service';
 import { WebhookEvent } from '../types';
-import { isCommand } from '../utils/command-parser';
 import { logger } from '../services/logger.service';
 
 const router = Router();
@@ -30,50 +28,12 @@ async function handleEvent(event: WebhookEvent): Promise<void> {
   const replyToken = event.replyToken;
   
   try {
-    if (isCommand(userMessage)) {
-      const taskResult = await taskManagerService.processInput(userId, userMessage);
-      
-      logger.info('Webhook', 'Task command processed', {
-        userId: maskUserId(userId),
-        input: userMessage.substring(0, 50),
-        success: taskResult.success,
-      });
-      
-      await lineService.replyMessage(replyToken, [{
-        type: 'text',
-        text: taskResult.message || '命令处理完成',
-      }]);
-      return;
-    }
-    
-    const intentResult = await llmService.recognizeIntent(userMessage);
-    
-    if (intentResult.intent === 'create_task' && intentResult.confidence > 0.7) {
-      const { schedule, scheduleDescription, taskName } = intentResult.entities || {};
-      
-      if (schedule) {
-        const taskResult = await taskManagerService.createTaskFromNaturalLanguage(
-          userId,
-          schedule,
-          scheduleDescription,
-          taskName
-        );
-        
-        logger.info('Webhook', 'Task created via natural language', {
-          userId: maskUserId(userId),
-          schedule,
-          success: taskResult.success,
-        });
-        
-        await lineService.replyMessage(replyToken, [{
-          type: 'text',
-          text: taskResult.message || '任务创建完成',
-        }]);
-        return;
-      }
-    }
-    
-    const reply = await llmService.chat(userId, userMessage);
+    logger.info('Webhook', 'Message received', {
+      userId: maskUserId(userId),
+      input: userMessage.substring(0, 50),
+    });
+
+    const reply = await agentService.run(userMessage, userId);
     
     await lineService.replyMessage(replyToken, [{
       type: 'text',
