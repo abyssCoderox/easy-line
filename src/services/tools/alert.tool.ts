@@ -1,6 +1,7 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import axios from 'axios';
+import { logger } from '../logger.service';
 
 export const alertQueryTool = new DynamicStructuredTool({
   name: 'alert_query',
@@ -15,17 +16,34 @@ export const alertQueryTool = new DynamicStructuredTool({
       .describe('设备名称筛选'),
   }),
   func: async ({ level = 'all', limit = 10, device }) => {
+    const toolName = 'alert_query';
+    const input = { level, limit, device };
+    
+    logger.debug('ALARM', `[${toolName}] Input`, {
+      input: JSON.stringify(input),
+    });
+
     try {
       const apiUrl = process.env.ALERT_API_URL;
       
       if (!apiUrl) {
-        return JSON.stringify({
+        const output = {
           success: false,
           error: 'ALERT_API_URL not configured',
           alerts: [],
+        };
+        logger.warn('ALARM', `[${toolName}] API URL not configured`);
+        logger.debug('ALARM', `[${toolName}] Output`, {
+          output: JSON.stringify(output),
         });
+        return JSON.stringify(output);
       }
       
+      logger.debug('ALARM', `[${toolName}] Calling API`, {
+        url: apiUrl,
+        params: JSON.stringify(input),
+      });
+
       const response = await axios.get(apiUrl, {
         params: { level, limit, device },
         timeout: 10000,
@@ -33,7 +51,7 @@ export const alertQueryTool = new DynamicStructuredTool({
       
       const alerts = response.data?.data?.alerts || [];
       
-      return JSON.stringify({
+      const output = {
         success: true,
         total: alerts.length,
         alerts: alerts.map((alert: any) => ({
@@ -44,8 +62,25 @@ export const alertQueryTool = new DynamicStructuredTool({
           timestamp: alert.timestamp,
           status: alert.status,
         })),
+      };
+
+      logger.debug('ALARM', `[${toolName}] Output`, {
+        alertCount: alerts.length,
+        output: JSON.stringify(output),
       });
+
+      logger.info('ALARM', `[${toolName}] Query completed`, {
+        alertCount: alerts.length,
+        level,
+      });
+      
+      return JSON.stringify(output);
     } catch (error: any) {
+      logger.error('ALARM', `[${toolName}] Error`, {
+        input: JSON.stringify(input),
+        error: error.message,
+        stack: error.stack,
+      });
       return JSON.stringify({
         success: false,
         error: error.message,

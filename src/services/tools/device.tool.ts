@@ -1,6 +1,7 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import axios from 'axios';
+import { logger } from '../logger.service';
 
 export const deviceStatusTool = new DynamicStructuredTool({
   name: 'device_status',
@@ -13,15 +14,27 @@ export const deviceStatusTool = new DynamicStructuredTool({
       .describe('状态筛选：online(在线)、offline(离线)、all(全部)'),
   }),
   func: async ({ deviceId, status = 'all' }) => {
+    const toolName = 'device_status';
+    const input = { deviceId, status };
+    
+    logger.debug('ALARM', `[${toolName}] Input`, {
+      input: JSON.stringify(input),
+    });
+
     try {
       const apiUrl = process.env.DEVICE_API_URL;
       
       if (!apiUrl) {
-        return JSON.stringify({
+        const output = {
           success: false,
           error: 'DEVICE_API_URL not configured',
           devices: [],
+        };
+        logger.warn('ALARM', `[${toolName}] API URL not configured`);
+        logger.debug('ALARM', `[${toolName}] Output`, {
+          output: JSON.stringify(output),
         });
+        return JSON.stringify(output);
       }
       
       const params: Record<string, any> = { status };
@@ -29,6 +42,11 @@ export const deviceStatusTool = new DynamicStructuredTool({
         params.deviceId = deviceId;
       }
       
+      logger.debug('ALARM', `[${toolName}] Calling API`, {
+        url: apiUrl,
+        params: JSON.stringify(params),
+      });
+
       const response = await axios.get(apiUrl, {
         params,
         timeout: 10000,
@@ -36,7 +54,7 @@ export const deviceStatusTool = new DynamicStructuredTool({
       
       const devices = response.data?.data?.devices || [];
       
-      return JSON.stringify({
+      const output = {
         success: true,
         total: devices.length,
         devices: devices.map((device: any) => ({
@@ -47,8 +65,25 @@ export const deviceStatusTool = new DynamicStructuredTool({
           memory: device.memory,
           lastSeen: device.lastSeen,
         })),
+      };
+
+      logger.debug('ALARM', `[${toolName}] Output`, {
+        deviceCount: devices.length,
+        output: JSON.stringify(output),
       });
+
+      logger.info('ALARM', `[${toolName}] Query completed`, {
+        deviceCount: devices.length,
+        status,
+      });
+      
+      return JSON.stringify(output);
     } catch (error: any) {
+      logger.error('ALARM', `[${toolName}] Error`, {
+        input: JSON.stringify(input),
+        error: error.message,
+        stack: error.stack,
+      });
       return JSON.stringify({
         success: false,
         error: error.message,

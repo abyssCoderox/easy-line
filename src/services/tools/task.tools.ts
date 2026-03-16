@@ -1,6 +1,7 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { taskManagerService } from '../task-manager.service';
+import { logger } from '../logger.service';
 
 let currentUserId: string = '';
 
@@ -16,6 +17,14 @@ export const createTaskTool = new DynamicStructuredTool({
     taskName: z.string().optional().describe('任务名称，如"开会提醒"、"吃药提醒"'),
   }),
   func: async ({ schedule, taskName }) => {
+    const toolName = 'create_task';
+    const input = { schedule, taskName };
+    
+    logger.debug('TASK', `[${toolName}] Input`, {
+      userId: currentUserId.substring(0, 8) + '...',
+      input: JSON.stringify(input),
+    });
+
     try {
       const result = await taskManagerService.createTaskFromNaturalLanguage(
         currentUserId,
@@ -24,14 +33,31 @@ export const createTaskTool = new DynamicStructuredTool({
         taskName
       );
       
-      return JSON.stringify({
+      const output = {
         success: result.success,
         message: result.message,
         taskId: result.taskId,
         schedule: result.schedule,
         nextExecuteTime: result.nextExecuteTime,
+      };
+
+      logger.debug('TASK', `[${toolName}] Output`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        output: JSON.stringify(output),
       });
+
+      logger.info('TASK', `[${toolName}] Task created`, {
+        taskId: result.taskId,
+        schedule: result.schedule,
+      });
+      
+      return JSON.stringify(output);
     } catch (error: any) {
+      logger.error('TASK', `[${toolName}] Error`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        input: JSON.stringify(input),
+        error: error.message,
+      });
       return JSON.stringify({ success: false, error: error.message });
     }
   },
@@ -42,11 +68,23 @@ export const listTasksTool = new DynamicStructuredTool({
   description: '查看用户的定时任务列表。当用户想查看任务、查看提醒、我的任务时使用。',
   schema: z.object({}),
   func: async () => {
+    const toolName = 'list_tasks';
+    
+    logger.debug('TASK', `[${toolName}] Input`, {
+      userId: currentUserId.substring(0, 8) + '...',
+      input: '{}',
+    });
+
     try {
       const tasks = taskManagerService.getUserTasks(currentUserId);
       
       if (tasks.length === 0) {
-        return JSON.stringify({ success: true, message: '您还没有创建任何定时任务。', tasks: [] });
+        const output = { success: true, message: '您还没有创建任何定时任务。', tasks: [] };
+        logger.debug('TASK', `[${toolName}] Output`, {
+          userId: currentUserId.substring(0, 8) + '...',
+          output: JSON.stringify(output),
+        });
+        return JSON.stringify(output);
       }
       
       const taskList = tasks.map((task, index) => ({
@@ -58,12 +96,28 @@ export const listTasksTool = new DynamicStructuredTool({
         nextExecuteTime: task.nextExecuteTime,
       }));
       
-      return JSON.stringify({
+      const output = {
         success: true,
         message: `您有 ${tasks.length} 个定时任务`,
         tasks: taskList,
+      };
+
+      logger.debug('TASK', `[${toolName}] Output`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        taskCount: tasks.length,
+        output: JSON.stringify(output),
       });
+
+      logger.info('TASK', `[${toolName}] Tasks listed`, {
+        taskCount: tasks.length,
+      });
+      
+      return JSON.stringify(output);
     } catch (error: any) {
+      logger.error('TASK', `[${toolName}] Error`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        error: error.message,
+      });
       return JSON.stringify({ success: false, error: error.message });
     }
   },
@@ -76,13 +130,39 @@ export const deleteTaskTool = new DynamicStructuredTool({
     taskId: z.string().describe('要删除的任务ID'),
   }),
   func: async ({ taskId }) => {
+    const toolName = 'delete_task';
+    const input = { taskId };
+    
+    logger.debug('TASK', `[${toolName}] Input`, {
+      userId: currentUserId.substring(0, 8) + '...',
+      input: JSON.stringify(input),
+    });
+
     try {
       const result = taskManagerService.deleteTask(currentUserId, taskId);
-      return JSON.stringify({
+      
+      const output = {
         success: result.success,
         message: result.message,
+      };
+
+      logger.debug('TASK', `[${toolName}] Output`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        output: JSON.stringify(output),
       });
+
+      logger.info('TASK', `[${toolName}] Task deleted`, {
+        taskId,
+        success: result.success,
+      });
+      
+      return JSON.stringify(output);
     } catch (error: any) {
+      logger.error('TASK', `[${toolName}] Error`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        input: JSON.stringify(input),
+        error: error.message,
+      });
       return JSON.stringify({ success: false, error: error.message });
     }
   },
@@ -95,13 +175,39 @@ export const enableTaskTool = new DynamicStructuredTool({
     taskId: z.string().describe('要启用的任务ID'),
   }),
   func: async ({ taskId }) => {
+    const toolName = 'enable_task';
+    const input = { taskId };
+    
+    logger.debug('TASK', `[${toolName}] Input`, {
+      userId: currentUserId.substring(0, 8) + '...',
+      input: JSON.stringify(input),
+    });
+
     try {
       const result = taskManagerService.updateTaskStatus(currentUserId, taskId, true);
-      return JSON.stringify({
+      
+      const output = {
         success: result.success,
         message: result.message,
+      };
+
+      logger.debug('TASK', `[${toolName}] Output`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        output: JSON.stringify(output),
       });
+
+      logger.info('TASK', `[${toolName}] Task enabled`, {
+        taskId,
+        success: result.success,
+      });
+      
+      return JSON.stringify(output);
     } catch (error: any) {
+      logger.error('TASK', `[${toolName}] Error`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        input: JSON.stringify(input),
+        error: error.message,
+      });
       return JSON.stringify({ success: false, error: error.message });
     }
   },
@@ -114,13 +220,39 @@ export const disableTaskTool = new DynamicStructuredTool({
     taskId: z.string().describe('要禁用的任务ID'),
   }),
   func: async ({ taskId }) => {
+    const toolName = 'disable_task';
+    const input = { taskId };
+    
+    logger.debug('TASK', `[${toolName}] Input`, {
+      userId: currentUserId.substring(0, 8) + '...',
+      input: JSON.stringify(input),
+    });
+
     try {
       const result = taskManagerService.updateTaskStatus(currentUserId, taskId, false);
-      return JSON.stringify({
+      
+      const output = {
         success: result.success,
         message: result.message,
+      };
+
+      logger.debug('TASK', `[${toolName}] Output`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        output: JSON.stringify(output),
       });
+
+      logger.info('TASK', `[${toolName}] Task disabled`, {
+        taskId,
+        success: result.success,
+      });
+      
+      return JSON.stringify(output);
     } catch (error: any) {
+      logger.error('TASK', `[${toolName}] Error`, {
+        userId: currentUserId.substring(0, 8) + '...',
+        input: JSON.stringify(input),
+        error: error.message,
+      });
       return JSON.stringify({ success: false, error: error.message });
     }
   },

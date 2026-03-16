@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type LogLevel = 'error' | 'warn' | 'info';
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
 export interface LoggerConfig {
   level: LogLevel;
@@ -19,7 +19,7 @@ export interface LogEntry {
   meta?: Record<string, any>;
 }
 
-export type LogModule = 'HTTP' | 'Scheduler' | 'LLM' | 'LINE' | 'Config' | 'Server' | 'Auth' | 'Webhook' | 'TaskManager' | 'Test' | 'ALARM' | 'WORKORDER';
+export type LogModule = 'HTTP' | 'Scheduler' | 'LLM' | 'LINE' | 'Config' | 'Server' | 'Auth' | 'Webhook' | 'TaskManager' | 'Test' | 'ALARM' | 'WORKORDER' | 'TASK';
 
 const DEFAULT_CONFIG: LoggerConfig = {
   level: 'info',
@@ -33,6 +33,7 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 0,
   warn: 1,
   info: 2,
+  debug: 3,
 };
 
 export class LoggerService {
@@ -60,7 +61,7 @@ export class LoggerService {
   }
 
   private ensureLogDirectories(): void {
-    const levels: LogLevel[] = ['error', 'warn', 'info'];
+    const levels: LogLevel[] = ['error', 'warn', 'info', 'debug'];
     for (const level of levels) {
       const dir = path.join(this.config.dir, level);
       if (!fs.existsSync(dir)) {
@@ -79,6 +80,10 @@ export class LoggerService {
 
   error(module: LogModule, message: string, meta?: Record<string, any>): void {
     this.log('error', module, message, meta);
+  }
+
+  debug(module: LogModule, message: string, meta?: Record<string, any>): void {
+    this.log('debug', module, message, meta);
   }
 
   private log(level: LogLevel, module: string, message: string, meta?: Record<string, any>): void {
@@ -112,6 +117,9 @@ export class LoggerService {
         break;
       case 'warn':
         console.warn(logLine);
+        break;
+      case 'debug':
+        console.log('\x1b[90m%s\x1b[0m', logLine);
         break;
       default:
         console.log(logLine);
