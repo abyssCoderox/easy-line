@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { config, validateConfig } from './config';
+import { validateAlarmConfig } from './config';
 import { schedulerService } from './services/scheduler.service';
 import { logger } from './services/logger.service';
 import webhookRoutes from './routes/webhook';
@@ -12,6 +13,7 @@ dotenv.config();
 
 try {
   validateConfig();
+  validateAlarmConfig();
   logger.info('Config', 'Configuration validated successfully');
 } catch (error: any) {
   logger.error('Config', 'Configuration validation failed', { error: error.message });

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "updatedAt": "2026-03-15T12:57:21.962Z",
+  "userTasks": [
+    {
+      "userId": "test-user",
+      "tasks": [
+        {
+          "taskId": "cb234ca0-203b-475d-9173-5c56021427c3",
+          "userId": "test-user",
+          "taskName": "notice me",
+          "schedule": "*/3 * * * *",
+          "enabled": true,
+          "createdAt": "2026-03-14T17:54:16.856Z",
+          "updatedAt": "2026-03-14T17:54:16.856Z",
+          "messageTemplate": "time_reminder",
+          "nextExecuteTime": "2026-03-15T13:00:00.000Z",
+          "executeCount": 0
+        },
+        {
+          "taskId": "a2f39505-fb84-48f3-9039-4fa251ab3060",
+          "userId": "test-user",
+          "taskName": "notice me",
+          "schedule": "*/10 * * * * *",
+          "enabled": false,
+          "createdAt": "2026-03-14T18:59:13.428Z",
+          "updatedAt": "2026-03-14T18:59:13.428Z",
+          "messageTemplate": "time_reminder",
+          "nextExecuteTime": "2026-03-14T18:59:20.000Z",
+          "executeCount": 0
+        }
+      ]
+    }
+  ]
+}

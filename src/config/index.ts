@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { AppConfig, LLMConfig, TaskLimitConfig } from '../types';
+import { AppConfig, LLMConfig, TaskLimitConfig, AlarmConfig } from '../types';
 
 dotenv.config();
 
@@ -49,6 +49,21 @@ function getTaskLimitConfig(): TaskLimitConfig {
       : DEFAULT_TASK_LIMITS.defaultMaxExecuteCount,
   };
 }
+
+function getAlarmConfig(): AlarmConfig {
+  return {
+    apiBaseUrl: process.env.ALARM_API_BASE_URL || '',
+    apiTimeout: parseInt(process.env.ALARM_API_TIMEOUT || '60000', 10),
+    difyWorkflowUrl: process.env.DIFY_WORKFLOW_URL || '',
+    difyApiKey: process.env.DIFY_API_KEY || '',
+    difyUser: process.env.DIFY_USER || 'langchain-agent',
+    defaultTenantId: process.env.DEFAULT_TENANT_ID,
+    defaultPmmsAuthorization: process.env.DEFAULT_PMMS_AUTHORIZATION,
+    flexMessageBuilder: (process.env.FLEX_MESSAGE_BUILDER as 'code' | 'llm') || 'code',
+  };
+}
+
+export const alarmConfig = getAlarmConfig();
 
 export const config: AppConfig = {
   port: parseInt(process.env.PORT || '3000', 10),
@@ -107,6 +122,27 @@ export function validateConfig(): void {
   }
 }
 
+export function validateAlarmConfig(): void {
+  const warnings: string[] = [];
+  
+  if (!alarmConfig.apiBaseUrl) {
+    warnings.push('ALARM_API_BASE_URL is not configured - alarm features will be disabled');
+  }
+  
+  if (!alarmConfig.difyWorkflowUrl) {
+    warnings.push('DIFY_WORKFLOW_URL is not configured - work order creation will be disabled');
+  }
+  
+  if (!alarmConfig.difyApiKey) {
+    warnings.push('DIFY_API_KEY is not configured - work order creation will be disabled');
+  }
+  
+  if (warnings.length > 0) {
+    console.warn('Alarm integration warnings:');
+    warnings.forEach(w => console.warn(`  - ${w}`));
+  }
+}
+
 export function printConfig(): void {
   console.log('Configuration loaded:');
   console.log(`  Port: ${config.port}`);
@@ -119,5 +155,11 @@ export function printConfig(): void {
   console.log(`  LLM Max History Length: ${config.llm.maxHistoryLength}`);
   if (config.llm.apiBaseUrl) {
     console.log(`  LLM API Base URL: ${config.llm.apiBaseUrl}`);
+  }
+  if (alarmConfig.apiBaseUrl) {
+    console.log(`  Alarm API Base URL: ${alarmConfig.apiBaseUrl}`);
+  }
+  if (alarmConfig.difyWorkflowUrl) {
+    console.log(`  Dify Workflow URL: ${alarmConfig.difyWorkflowUrl}`);
   }
 }

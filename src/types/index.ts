@@ -143,3 +143,5 @@ export type ImageMessage = line.ImageMessage;
 export type FlexMessage = line.FlexMessage;
 export type Message = line.Message;
 export type WebhookEvent = line.WebhookEvent;
+
+export * from './alarm.types';
